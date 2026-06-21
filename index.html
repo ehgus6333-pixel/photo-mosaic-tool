@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>사진 모자이크 & 강조 편집기</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#181b22; --panel2:#20242e; --line:#2b303b;
+    --text:#e7eaf0; --muted:#9aa3b2; --accent:#4f8cff; --accent2:#3a6fd8;
+    --danger:#ff5d5d; --ok:#37c871;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    display:flex; flex-direction:column; height:100vh; overflow:hidden;
+  }
+  header{
+    padding:10px 16px; border-bottom:1px solid var(--line); background:var(--panel);
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  }
+  header h1{font-size:15px; margin:0; font-weight:700; letter-spacing:.2px}
+  header .hint{font-size:12px; color:var(--muted)}
+
+  .toolbar{
+    background:var(--panel); border-bottom:1px solid var(--line);
+    padding:8px 12px; display:flex; flex-direction:column; gap:8px;
+  }
+  .row{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  .group{display:flex; align-items:center; gap:6px; padding:4px 8px;
+    background:var(--panel2); border:1px solid var(--line); border-radius:10px}
+  .group .label{font-size:11px; color:var(--muted); margin-right:2px}
+
+  button.tool, .btn{
+    appearance:none; border:1px solid var(--line); background:#262b36; color:var(--text);
+    padding:7px 11px; border-radius:9px; font-size:13px; cursor:pointer; line-height:1;
+    display:inline-flex; align-items:center; gap:6px; transition:.12s; white-space:nowrap;
+  }
+  button.tool:hover,.btn:hover{background:#2f3644; border-color:#3a414f}
+  button.tool.active{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600}
+  .btn.primary:hover{background:var(--accent2)}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.4; cursor:not-allowed}
+
+  input[type=range]{width:120px; accent-color:var(--accent)}
+  input[type=color]{width:34px; height:28px; border:1px solid var(--line); border-radius:7px; background:none; padding:2px; cursor:pointer}
+  select{background:#262b36; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:13px; cursor:pointer}
+  .val{font-size:12px; color:var(--muted); min-width:34px; text-align:right; font-variant-numeric:tabular-nums}
+
+  .stage{
+    flex:1; position:relative; overflow:auto; display:flex; align-items:center; justify-content:center;
+    background:
+      linear-gradient(45deg,#14161c 25%,transparent 25%),
+      linear-gradient(-45deg,#14161c 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#14161c 75%),
+      linear-gradient(-45deg,transparent 75%,#14161c 75%);
+    background-size:24px 24px; background-position:0 0,0 12px,12px -12px,-12px 0;
+    background-color:#0c0d11; padding:24px;
+  }
+  #canvas{
+    background:#fff; box-shadow:0 8px 40px rgba(0,0,0,.5); border-radius:4px;
+    max-width:100%; max-height:100%; touch-action:none; display:none;
+  }
+  #canvas.ready{display:block}
+
+  .placeholder{
+    position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; pointer-events:none; text-align:center; padding:20px;
+  }
+  .placeholder .big{font-size:20px; font-weight:700}
+  .placeholder .kbd{
+    display:inline-flex; gap:6px; align-items:center; font-size:13px; color:var(--muted);
+  }
+  .placeholder code{
+    background:var(--panel2); border:1px solid var(--line); border-bottom-width:2px;
+    padding:3px 8px; border-radius:6px; font-size:13px; color:var(--text);
+  }
+  .placeholder .sub{font-size:12.5px; color:var(--muted); max-width:420px; line-height:1.6}
+  .placeholder .pick{pointer-events:auto}
+
+  .stage.dragover::after{
+    content:"여기에 이미지를 놓으세요"; position:absolute; inset:14px;
+    border:2px dashed var(--accent); border-radius:14px; display:flex; align-items:center; justify-content:center;
+    color:var(--accent); font-size:18px; font-weight:700; background:rgba(79,140,255,.08);
+  }
+
+  footer{
+    border-top:1px solid var(--line); background:var(--panel); padding:6px 14px;
+    font-size:12px; color:var(--muted); display:flex; justify-content:space-between; align-items:center; gap:10px;
+  }
+  footer .priv{color:var(--ok)}
+  .toast{
+    position:fixed; bottom:46px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:#222834; border:1px solid var(--line); color:var(--text); padding:10px 18px;
+    border-radius:10px; font-size:13px; opacity:0; pointer-events:none; transition:.25s; z-index:50;
+    box-shadow:0 6px 24px rgba(0,0,0,.4);
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  .sep{width:1px; height:24px; background:var(--line); margin:0 2px}
+  .hidden{display:none !important}
+</style>
+</head>
+<body>
+<header>
+  <h1>🖼️ 사진 모자이크 &amp; 강조 편집기</h1>
+  <span class="hint">붙여넣기(Ctrl/Cmd+V) → 편집 → 복사/저장 · 모든 처리는 브라우저 안에서만 수행됩니다</span>
+</header>
+
+<div class="toolbar">
+  <!-- 도구 행 -->
+  <div class="row">
+    <div class="group">
+      <span class="label">도구</span>
+      <button class="tool active" data-tool="select" title="선택/이동 (V)">↖ 선택</button>
+      <div class="sep"></div>
+      <button class="tool" data-tool="mosaic-rect" title="사각형 모자이크 (R)">▭ 사각모자이크</button>
+      <button class="tool" data-tool="mosaic-ellipse" title="원형 모자이크 (O)">◯ 원모자이크</button>
+      <button class="tool" data-tool="mosaic-free" title="자유곡선 모자이크 (F)">✎ 자유모자이크</button>
+      <div class="sep"></div>
+      <button class="tool" data-tool="shape-rect" title="사각형 강조">▭ 사각강조</button>
+      <button class="tool" data-tool="shape-ellipse" title="원형 강조">◯ 원강조</button>
+      <button class="tool" data-tool="shape-arrow" title="화살표">↗ 화살표</button>
+      <div class="sep"></div>
+      <button class="tool" data-tool="spotlight-ellipse" title="스포트라이트(원) — 주변 어둡게">🔦 스포트라이트◯</button>
+      <button class="tool" data-tool="spotlight-rect" title="스포트라이트(사각) — 주변 어둡게">🔦 스포트라이트▭</button>
+    </div>
+
+    <div class="group" id="grp-undo">
+      <button class="btn ghost" id="undoBtn" title="실행 취소 (Ctrl+Z)" disabled>↶ Undo</button>
+      <button class="btn ghost" id="redoBtn" title="다시 실행 (Ctrl+Y)" disabled>↷ Redo</button>
+      <button class="btn ghost" id="forwardBtn" title="앞으로 가져오기" disabled>▲ 앞으로</button>
+      <button class="btn ghost" id="backwardBtn" title="뒤로 보내기" disabled>▼ 뒤로</button>
+      <button class="btn ghost" id="deleteBtn" title="선택 삭제 (Del)" disabled>🗑 삭제</button>
+      <button class="btn ghost" id="clearBtn" title="전체 초기화" disabled>전체초기화</button>
+    </div>
+  </div>
+
+  <!-- 옵션 행 -->
+  <div class="row">
+    <div class="group" id="grp-mosaic">
+      <span class="label">모자이크</span>
+      <select id="mosaicMethod" title="처리 방식">
+        <option value="pixelate">픽셀화</option>
+        <option value="blur">블러</option>
+        <option value="solid">단색채우기</option>
+      </select>
+      <span class="label" id="strengthLabel">강도</span>
+      <input type="range" id="strength" min="4" max="60" value="16" />
+      <span class="val" id="strengthVal">16</span>
+      <input type="color" id="solidColor" value="#000000" title="단색 채우기 색상" class="hidden" />
+      <div class="sep"></div>
+      <button class="btn" id="faceBtn" title="AI 얼굴 자동 감지 후 모자이크">🙂 얼굴 자동 모자이크</button>
+    </div>
+
+    <div class="group" id="grp-shape">
+      <span class="label">강조</span>
+      <input type="color" id="strokeColor" value="#ff3b30" title="선 색상" />
+      <span class="label">두께</span>
+      <input type="range" id="thickness" min="1" max="30" value="5" />
+      <span class="val" id="thicknessVal">5</span>
+    </div>
+
+    <div class="group" id="grp-spot">
+      <span class="label">스포트라이트</span>
+      <span class="label">어둡기</span>
+      <input type="range" id="spotDark" min="20" max="95" value="65" />
+      <span class="val" id="spotDarkVal">65%</span>
+    </div>
+
+    <div class="group">
+      <button class="btn" id="pasteBtn" title="클립보드에서 붙여넣기">📋 붙여넣기</button>
+      <button class="btn" id="openBtn">📂 파일 열기</button>
+      <input type="file" id="fileInput" accept="image/*" class="hidden" />
+    </div>
+
+    <div class="group">
+      <button class="btn primary" id="copyBtn" title="결과를 클립보드로 복사" disabled>⧉ 복사</button>
+      <select id="saveFormat" title="저장 포맷">
+        <option value="png">PNG</option>
+        <option value="jpg">JPG</option>
+      </select>
+      <span class="label hidden" id="qualityLabel">품질</span>
+      <input type="range" id="jpgQuality" min="40" max="100" value="92" class="hidden" />
+      <span class="val hidden" id="jpgQualityVal">92</span>
+      <button class="btn primary" id="saveBtn" title="이미지로 저장" disabled>⤓ 저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="stage" id="stage">
+  <canvas id="canvas"></canvas>
+  <div class="placeholder" id="placeholder">
+    <div class="big">📋 Ctrl + V 로 이미지를 붙여넣으세요</div>
+    <div class="kbd"><code>Ctrl</code> + <code>V</code> &nbsp;( Mac: <code>⌘</code> + <code>V</code> )</div>
+    <div class="sub">또는 이미지 파일을 이 영역으로 <b>드래그</b>하거나 아래 버튼으로 선택하세요.<br>
+      얼굴·번호판·이름 등 민감한 부분을 모자이크로 가리고, 중요한 부분은 도형으로 강조할 수 있습니다.</div>
+    <button class="btn primary pick" id="placeholderPick">📂 이미지 파일 선택</button>
+  </div>
+</div>
+
+<footer>
+  <span class="priv">🔒 업로드 없음 — 모든 편집은 이 브라우저 안에서만 처리됩니다.</span>
+  <span id="status">이미지를 붙여넣어 시작하세요.</span>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---------- 상태 ----------
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const base = document.createElement('canvas');   // 원본 이미지(오프스크린)
+  const bctx = base.getContext('2d');
+
+  let objects = [];          // 편집 객체 목록
+  let selectedId = null;
+  let nextId = 1;
+  let tool = 'select';
+  let hasImage = false;
+
+  // 옵션
+  const opt = {
+    mosaicMethod: 'pixelate',
+    strength: 16,
+    solidColor: '#000000',
+    strokeColor: '#ff3b30',
+    thickness: 5,
+    spotDarkness: 0.65,
+  };
+
+  // 드래그/상호작용 상태
+  let action = null; // {mode, id, handle, startX, startY, orig, points}
+
+  // 히스토리
+  let history = [];
+  let future = [];
+
+  // ---------- 유틸 ----------
+  const $ = id => document.getElementById(id);
+  const clone = o => JSON.parse(JSON.stringify(o));
+  function toast(msg){
+    const t = $('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove('show'), 1800);
+  }
+  function setStatus(s){ $('status').textContent = s; }
+
+  function norm(o){ // 음수 w/h 정규화 (rect/ellipse)
+    if (o.w < 0){ o.x += o.w; o.w = -o.w; }
+    if (o.h < 0){ o.y += o.h; o.h = -o.h; }
+  }
+
+  // ---------- 히스토리 ----------
+  function pushHistory(){
+    history.push(clone(objects));
+    if (history.length > 60) history.shift();
+    future = [];
+    refreshButtons();
+  }
+  function undo(){
+    if (!history.length) return;
+    future.push(clone(objects));
+    objects = history.pop();
+    selectedId = null;
+    render(); refreshButtons();
+  }
+  function redo(){
+    if (!future.length) return;
+    history.push(clone(objects));
+    objects = future.pop();
+    selectedId = null;
+    render(); refreshButtons();
+  }
+
+  function refreshButtons(){
+    $('undoBtn').disabled = history.length === 0;
+    $('redoBtn').disabled = future.length === 0;
+    $('deleteBtn').disabled = selectedId === null;
+    $('forwardBtn').disabled = selectedId === null;
+    $('backwardBtn').disabled = selectedId === null;
+    $('clearBtn').disabled = objects.length === 0;
+    $('copyBtn').disabled = !hasImage;
+    $('saveBtn').disabled = !hasImage;
+    $('faceBtn').disabled = !hasImage;
+  }
+
+  // ---------- 이미지 로딩 ----------
+  function loadImage(img){
+    base.width = img.naturalWidth || img.width;
+    base.height = img.naturalHeight || img.height;
+    bctx.clearRect(0,0,base.width,base.height);
+    bctx.drawImage(img, 0, 0);
+    canvas.width = base.width;
+    canvas.height = base.height;
+    fitCanvas();
+    objects = []; selectedId = null; history = []; future = [];
+    hasImage = true;
+    canvas.classList.add('ready');
+    $('placeholder').classList.add('hidden');
+    render(); refreshButtons();
+    setStatus(`이미지 로드됨 — ${base.width} × ${base.height}px`);
+  }
+  function loadFromBlobOrFile(file){
+    if (!file || !file.type.startsWith('image/')) { toast('이미지 파일이 아닙니다.'); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { loadImage(img); URL.revokeObjectURL(url); toast('이미지를 불러왔습니다.'); };
+    img.onerror = () => { toast('이미지를 읽지 못했습니다.'); URL.revokeObjectURL(url); };
+    img.src = url;
+  }
+
+  function fitCanvas(){
+    // CSS로 stage에 맞춰 축소 (원본 해상도는 유지)
+    const stage = $('stage');
+    const pad = 48;
+    const maxW = stage.clientWidth - pad;
+    const maxH = stage.clientHeight - pad;
+    const scale = Math.min(1, maxW / canvas.width, maxH / canvas.height);
+    canvas.style.width = (canvas.width * scale) + 'px';
+    canvas.style.height = (canvas.height * scale) + 'px';
+  }
+  window.addEventListener('resize', () => { if (hasImage) fitCanvas(); });
+
+  // ---------- 좌표 변환 ----------
+  function toCanvasCoords(e){
+    const r = canvas.getBoundingClientRect();
+    const sx = canvas.width / r.width;
+    const sy = canvas.height / r.height;
+    const cx = (e.clientX !== undefined ? e.clientX : e.touches[0].clientX);
+    const cy = (e.clientY !== undefined ? e.clientY : e.touches[0].clientY);
+    return { x: (cx - r.left) * sx, y: (cy - r.top) * sy };
+  }
+
+  // ---------- 렌더링 ----------
+  function render(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if (hasImage) ctx.drawImage(base, 0, 0);
+    for (const o of objects){ if (o.type.startsWith('spotlight')) continue; drawObject(o); }
+    drawSpotlights();
+    const sel = objects.find(o => o.id === selectedId);
+    if (sel) drawSelection(sel);
+  }
+
+  // 스포트라이트: 전체를 어둡게 + 지정 영역만 밝게 뚫기 (여러 개 합성)
+  function drawSpotlights(){
+    const sp = objects.filter(o => o.type.startsWith('spotlight') && bounds(o).w>1 && bounds(o).h>1);
+    if (!sp.length) return;
+    const darkness = Math.max(...sp.map(o => o.darkness ?? 0.65));
+    const ov = document.createElement('canvas');
+    ov.width = canvas.width; ov.height = canvas.height;
+    const o2 = ov.getContext('2d');
+    o2.fillStyle = `rgba(0,0,0,${darkness})`;
+    o2.fillRect(0,0,ov.width,ov.height);
+    o2.globalCompositeOperation = 'destination-out';
+    for (const o of sp){
+      const b = bounds(o);
+      o2.beginPath();
+      if (o.type==='spotlight-ellipse') o2.ellipse(b.x+b.w/2,b.y+b.h/2,b.w/2,b.h/2,0,0,Math.PI*2);
+      else o2.rect(b.x,b.y,b.w,b.h);
+      o2.fill();
+    }
+    ctx.drawImage(ov,0,0);
+  }
+
+  function drawObject(o){
+    switch(o.type){
+      case 'mosaic-rect':    drawMosaicRect(o); break;
+      case 'mosaic-ellipse': drawMosaicEllipse(o); break;
+      case 'mosaic-free':    drawMosaicFree(o); break;
+      case 'shape-rect':     drawShapeRect(o); break;
+      case 'shape-ellipse':  drawShapeEllipse(o); break;
+      case 'shape-arrow':    drawArrow(o); break;
+    }
+  }
+
+  // 모자이크 영역 채우기 (clip 후 호출)
+  function paintMosaicRegion(x,y,w,h,o){
+    if (o.method === 'solid'){
+      ctx.fillStyle = o.color || '#000';
+      ctx.fillRect(x,y,w,h);
+      return;
+    }
+    if (o.method === 'blur'){
+      const prev = ctx.filter;
+      ctx.filter = `blur(${Math.max(1, o.strength/2)}px)`;
+      // 블러는 가장자리 누수 방지를 위해 영역을 조금 넓게 샘플
+      const m = Math.ceil(o.strength);
+      ctx.drawImage(base, Math.max(0,x-m), Math.max(0,y-m),
+        Math.min(base.width, w+2*m), Math.min(base.height, h+2*m),
+        Math.max(0,x-m), Math.max(0,y-m),
+        Math.min(base.width, w+2*m), Math.min(base.height, h+2*m));
+      ctx.filter = prev;
+      return;
+    }
+    // pixelate
+    const block = Math.max(2, o.strength);
+    const sw = Math.max(1, Math.round(w / block));
+    const sh = Math.max(1, Math.round(h / block));
+    const tmp = document.createElement('canvas');
+    tmp.width = sw; tmp.height = sh;
+    const tctx = tmp.getContext('2d');
+    tctx.imageSmoothingEnabled = false;
+    tctx.drawImage(base, x, y, w, h, 0, 0, sw, sh);
+    const prevS = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tmp, 0, 0, sw, sh, x, y, w, h);
+    ctx.imageSmoothingEnabled = prevS;
+  }
+
+  function drawMosaicRect(o){
+    const x=Math.round(o.x), y=Math.round(o.y), w=Math.round(o.w), h=Math.round(o.h);
+    if (w<=0||h<=0) return;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+    paintMosaicRegion(x,y,w,h,o);
+    ctx.restore();
+  }
+  function drawMosaicEllipse(o){
+    const x=o.x,y=o.y,w=o.w,h=o.h;
+    if (w<=0||h<=0) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(x+w/2, y+h/2, w/2, h/2, 0, 0, Math.PI*2);
+    ctx.clip();
+    paintMosaicRegion(Math.round(x),Math.round(y),Math.round(w),Math.round(h),o);
+    ctx.restore();
+  }
+  function drawMosaicFree(o){
+    if (!o.points || o.points.length < 2) return;
+    const b = freeBounds(o);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(o.points[0].x, o.points[0].y);
+    for (let i=1;i<o.points.length;i++) ctx.lineTo(o.points[i].x, o.points[i].y);
+    ctx.closePath();
+    // 두꺼운 브러시 느낌: 선 자체도 clip 영역에 포함
+    ctx.clip();
+    paintMosaicRegion(Math.floor(b.x), Math.floor(b.y), Math.ceil(b.w), Math.ceil(b.h), o);
+    ctx.restore();
+  }
+
+  function drawShapeRect(o){
+    norm(o);
+    ctx.save();
+    ctx.strokeStyle = o.color; ctx.lineWidth = o.thickness; ctx.lineJoin='round';
+    ctx.strokeRect(o.x, o.y, o.w, o.h);
+    ctx.restore();
+  }
+  function drawShapeEllipse(o){
+    ctx.save();
+    ctx.strokeStyle = o.color; ctx.lineWidth = o.thickness;
+    ctx.beginPath();
+    ctx.ellipse(o.x+o.w/2, o.y+o.h/2, Math.abs(o.w/2), Math.abs(o.h/2), 0, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  function drawArrow(o){
+    const {x1,y1,x2,y2,color,thickness} = o;
+    const ang = Math.atan2(y2-y1, x2-x1);
+    const head = Math.max(12, thickness*3.2);
+    ctx.save();
+    ctx.strokeStyle = color; ctx.fillStyle = color;
+    ctx.lineWidth = thickness; ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(x1,y1);
+    ctx.lineTo(x2 - Math.cos(ang)*head*0.6, y2 - Math.sin(ang)*head*0.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x2,y2);
+    ctx.lineTo(x2 - head*Math.cos(ang - Math.PI/7), y2 - head*Math.sin(ang - Math.PI/7));
+    ctx.lineTo(x2 - head*Math.cos(ang + Math.PI/7), y2 - head*Math.sin(ang + Math.PI/7));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ---------- 경계 계산 ----------
+  function freeBounds(o){
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    for (const p of o.points){ minX=Math.min(minX,p.x); minY=Math.min(minY,p.y); maxX=Math.max(maxX,p.x); maxY=Math.max(maxY,p.y); }
+    return {x:minX,y:minY,w:maxX-minX,h:maxY-minY};
+  }
+  function bounds(o){
+    if (o.type==='shape-arrow'){
+      return {x:Math.min(o.x1,o.x2), y:Math.min(o.y1,o.y2), w:Math.abs(o.x2-o.x1), h:Math.abs(o.y2-o.y1)};
+    }
+    if (o.type==='mosaic-free') return freeBounds(o);
+    const b={x:o.x,y:o.y,w:o.w,h:o.h};
+    if (b.w<0){b.x+=b.w;b.w=-b.w;} if (b.h<0){b.y+=b.h;b.h=-b.h;}
+    return b;
+  }
+
+  // ---------- 선택/핸들 ----------
+  const HANDLE = 9; // 화면상 핸들 반경(원본 px 환산은 scale 적용)
+  function curScale(){ const r=canvas.getBoundingClientRect(); return canvas.width/r.width; }
+
+  function handlePositions(o){
+    if (o.type==='shape-arrow'){
+      return [{name:'p1',x:o.x1,y:o.y1},{name:'p2',x:o.x2,y:o.y2}];
+    }
+    const b = bounds(o);
+    const cx=b.x+b.w/2, cy=b.y+b.h/2, r=b.x+b.w, bo=b.y+b.h;
+    return [
+      {name:'nw',x:b.x,y:b.y},{name:'n',x:cx,y:b.y},{name:'ne',x:r,y:b.y},
+      {name:'e',x:r,y:cy},{name:'se',x:r,y:bo},{name:'s',x:cx,y:bo},
+      {name:'sw',x:b.x,y:bo},{name:'w',x:b.x,y:cy},
+    ];
+  }
+
+  function drawSelection(o){
+    const s = curScale();
+    const hb = HANDLE * s;
+    ctx.save();
+    ctx.strokeStyle = '#4f8cff'; ctx.lineWidth = Math.max(1, 1.5*s); ctx.setLineDash([6*s,4*s]);
+    if (o.type==='mosaic-free'){
+      const b = freeBounds(o);
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+    } else if (o.type==='shape-arrow'){
+      ctx.beginPath(); ctx.moveTo(o.x1,o.y1); ctx.lineTo(o.x2,o.y2); ctx.stroke();
+    } else {
+      const b=bounds(o); ctx.strokeRect(b.x,b.y,b.w,b.h);
+    }
+    ctx.setLineDash([]);
+    if (o.type!=='mosaic-free'){
+      for (const h of handlePositions(o)){
+        ctx.fillStyle='#fff'; ctx.strokeStyle='#4f8cff'; ctx.lineWidth=Math.max(1,1.5*s);
+        ctx.beginPath(); ctx.rect(h.x-hb/2, h.y-hb/2, hb, hb); ctx.fill(); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  // 히트 테스트
+  function hitHandle(o, p){
+    const s = curScale();
+    const hb = (HANDLE+3) * s;
+    for (const h of handlePositions(o)){
+      if (Math.abs(p.x-h.x)<=hb && Math.abs(p.y-h.y)<=hb) return h.name;
+    }
+    return null;
+  }
+  function hitObject(o, p){
+    const tol = 8 * curScale();
+    if (o.type==='shape-arrow'){
+      return distToSeg(p, {x:o.x1,y:o.y1},{x:o.x2,y:o.y2}) <= Math.max(tol, o.thickness);
+    }
+    const b = bounds(o);
+    if (o.type==='shape-rect' || o.type==='shape-ellipse'){
+      // 외곽선 부근만 (속 빈 도형)
+      const inOuter = p.x>=b.x-tol && p.x<=b.x+b.w+tol && p.y>=b.y-tol && p.y<=b.y+b.h+tol;
+      const inInner = p.x>=b.x+tol && p.x<=b.x+b.w-tol && p.y>=b.y+tol && p.y<=b.y+b.h-tol;
+      return inOuter && !inInner;
+    }
+    // 모자이크/사각·원: 면적 전체
+    return p.x>=b.x && p.x<=b.x+b.w && p.y>=b.y && p.y<=b.y+b.h;
+  }
+  function distToSeg(p,a,b){
+    const dx=b.x-a.x, dy=b.y-a.y; const len2=dx*dx+dy*dy;
+    let t = len2 ? ((p.x-a.x)*dx+(p.y-a.y)*dy)/len2 : 0;
+    t = Math.max(0,Math.min(1,t));
+    const cx=a.x+t*dx, cy=a.y+t*dy;
+    return Math.hypot(p.x-cx,p.y-cy);
+  }
+
+  function findTopAt(p){
+    for (let i=objects.length-1;i>=0;i--){ if (hitObject(objects[i],p)) return objects[i]; }
+    return null;
+  }
+
+  // ---------- 마우스/터치 인터랙션 ----------
+  function onDown(e){
+    if (!hasImage) return;
+    e.preventDefault();
+    const p = toCanvasCoords(e);
+
+    if (tool === 'select'){
+      const sel = objects.find(o=>o.id===selectedId);
+      if (sel){
+        const h = hitHandle(sel, p);
+        if (h){
+          action = {mode:'resize', id:sel.id, handle:h, start:p, orig:clone(sel)};
+          return;
+        }
+      }
+      const hitObj = findTopAt(p);
+      if (hitObj){
+        selectedId = hitObj.id;
+        action = {mode:'move', id:hitObj.id, start:p, orig:clone(hitObj)};
+        render(); refreshButtons();
+      } else {
+        selectedId = null; render(); refreshButtons();
+      }
+      return;
+    }
+
+    // 그리기 도구
+    if (tool === 'mosaic-free'){
+      const o = {id:nextId++, type:'mosaic-free', points:[p],
+        method:opt.mosaicMethod, strength:opt.strength, color:opt.solidColor};
+      objects.push(o);
+      action = {mode:'draw-free', id:o.id};
+      render();
+      return;
+    }
+    if (tool === 'shape-arrow'){
+      const o = {id:nextId++, type:'shape-arrow', x1:p.x,y1:p.y,x2:p.x,y2:p.y,
+        color:opt.strokeColor, thickness:opt.thickness};
+      objects.push(o);
+      action = {mode:'draw-arrow', id:o.id};
+      return;
+    }
+    // rect/ellipse (mosaic or shape)
+    let o;
+    if (tool==='mosaic-rect') o={id:nextId++,type:'mosaic-rect',x:p.x,y:p.y,w:0,h:0,method:opt.mosaicMethod,strength:opt.strength,color:opt.solidColor};
+    else if (tool==='mosaic-ellipse') o={id:nextId++,type:'mosaic-ellipse',x:p.x,y:p.y,w:0,h:0,method:opt.mosaicMethod,strength:opt.strength,color:opt.solidColor};
+    else if (tool==='shape-rect') o={id:nextId++,type:'shape-rect',x:p.x,y:p.y,w:0,h:0,color:opt.strokeColor,thickness:opt.thickness};
+    else if (tool==='shape-ellipse') o={id:nextId++,type:'shape-ellipse',x:p.x,y:p.y,w:0,h:0,color:opt.strokeColor,thickness:opt.thickness};
+    else if (tool==='spotlight-rect') o={id:nextId++,type:'spotlight-rect',x:p.x,y:p.y,w:0,h:0,darkness:opt.spotDarkness};
+    else if (tool==='spotlight-ellipse') o={id:nextId++,type:'spotlight-ellipse',x:p.x,y:p.y,w:0,h:0,darkness:opt.spotDarkness};
+    objects.push(o);
+    action = {mode:'draw-rect', id:o.id, start:p};
+  }
+
+  function onMove(e){
+    if (!action) return;
+    e.preventDefault();
+    const p = toCanvasCoords(e);
+    const o = objects.find(x=>x.id===action.id);
+    if (!o) return;
+
+    if (action.mode==='draw-rect'){
+      o.w = p.x - action.start.x; o.h = p.y - action.start.y;
+    } else if (action.mode==='draw-arrow'){
+      o.x2 = p.x; o.y2 = p.y;
+    } else if (action.mode==='draw-free'){
+      o.points.push(p);
+    } else if (action.mode==='move'){
+      const dx=p.x-action.start.x, dy=p.y-action.start.y;
+      moveObject(o, action.orig, dx, dy);
+    } else if (action.mode==='resize'){
+      resizeObject(o, action.orig, action.handle, p);
+    }
+    render();
+  }
+
+  function onUp(e){
+    if (!action){ return; }
+    const o = objects.find(x=>x.id===action.id);
+
+    if (action.mode==='draw-rect'){
+      if (o && (Math.abs(o.w)<3 || Math.abs(o.h)<3)){ objects.pop(); action=null; render(); return; }
+      if (o) norm(o);
+      selectedId = o ? o.id : null;
+      switchTool('select', true);
+      pushHistory();
+    } else if (action.mode==='draw-arrow'){
+      if (o && Math.hypot(o.x2-o.x1,o.y2-o.y1)<5){ objects.pop(); action=null; render(); return; }
+      selectedId = o ? o.id : null;
+      switchTool('select', true);
+      pushHistory();
+    } else if (action.mode==='draw-free'){
+      if (o && o.points.length<3){ objects.pop(); action=null; render(); return; }
+      selectedId = o ? o.id : null;
+      switchTool('select', true);
+      pushHistory();
+    } else if (action.mode==='move' || action.mode==='resize'){
+      if (o) norm(o);
+      pushHistory();
+    }
+    action = null;
+    render(); refreshButtons();
+  }
+
+  function moveObject(o, orig, dx, dy){
+    if (o.type==='shape-arrow'){
+      o.x1=orig.x1+dx; o.y1=orig.y1+dy; o.x2=orig.x2+dx; o.y2=orig.y2+dy;
+    } else if (o.type==='mosaic-free'){
+      o.points = orig.points.map(pt=>({x:pt.x+dx,y:pt.y+dy}));
+    } else {
+      o.x=orig.x+dx; o.y=orig.y+dy;
+    }
+  }
+
+  function resizeObject(o, orig, handle, p){
+    if (o.type==='shape-arrow'){
+      if (handle==='p1'){ o.x1=p.x; o.y1=p.y; } else { o.x2=p.x; o.y2=p.y; }
+      return;
+    }
+    if (o.type==='mosaic-free'){
+      // 자유곡선은 바운딩박스 기준 스케일
+      const b=freeBounds(orig);
+      let nx=b.x, ny=b.y, nr=b.x+b.w, nb=b.y+b.h;
+      if (handle.includes('w')) nx=p.x; if (handle.includes('e')) nr=p.x;
+      if (handle.includes('n')) ny=p.y; if (handle.includes('s')) nb=p.y;
+      const nw=nr-nx, nh=nb-ny;
+      if (b.w===0||b.h===0) return;
+      const sx=nw/b.w, sy=nh/b.h;
+      o.points = orig.points.map(pt=>({x:nx+(pt.x-b.x)*sx, y:ny+(pt.y-b.y)*sy}));
+      return;
+    }
+    let x=orig.x, y=orig.y, r=orig.x+orig.w, btm=orig.y+orig.h;
+    if (handle.includes('w')) x=p.x;
+    if (handle.includes('e')) r=p.x;
+    if (handle.includes('n')) y=p.y;
+    if (handle.includes('s')) btm=p.y;
+    o.x=x; o.y=y; o.w=r-x; o.h=btm-y;
+  }
+
+  // 커서 갱신
+  function updateCursor(e){
+    if (!hasImage || action) return;
+    const p = toCanvasCoords(e);
+    let cur = 'default';
+    if (tool!=='select'){ cur='crosshair'; }
+    else {
+      const sel = objects.find(o=>o.id===selectedId);
+      if (sel && hitHandle(sel,p)){
+        const h=hitHandle(sel,p);
+        const map={nw:'nwse-resize',se:'nwse-resize',ne:'nesw-resize',sw:'nesw-resize',n:'ns-resize',s:'ns-resize',e:'ew-resize',w:'ew-resize',p1:'move',p2:'move'};
+        cur=map[h]||'move';
+      } else if (findTopAt(p)){ cur='move'; }
+    }
+    canvas.style.cursor = cur;
+  }
+
+  canvas.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', e=>{ onMove(e); });
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('mousemove', updateCursor);
+  // 터치
+  canvas.addEventListener('touchstart', onDown, {passive:false});
+  canvas.addEventListener('touchmove', e=>{ onMove(e); }, {passive:false});
+  canvas.addEventListener('touchend', onUp);
+
+  // ---------- 도구 전환 ----------
+  function switchTool(t, silent){
+    tool = t;
+    document.querySelectorAll('button.tool').forEach(b=>b.classList.toggle('active', b.dataset.tool===t));
+    if (t!=='select') { /* 그릴 땐 선택 해제는 유지 */ }
+    canvas.style.cursor = t==='select' ? 'default' : 'crosshair';
+  }
+  document.querySelectorAll('button.tool').forEach(b=>{
+    b.addEventListener('click', ()=>switchTool(b.dataset.tool));
+  });
+
+  // ---------- 옵션 컨트롤 ----------
+  function syncMethodUI(){
+    const isSolid = opt.mosaicMethod==='solid';
+    $('solidColor').classList.toggle('hidden', !isSolid);
+    $('strength').classList.toggle('hidden', isSolid);
+    $('strengthVal').classList.toggle('hidden', isSolid);
+    $('strengthLabel').textContent = opt.mosaicMethod==='blur' ? '블러강도' : '블록크기';
+  }
+  $('mosaicMethod').addEventListener('change', e=>{ opt.mosaicMethod=e.target.value; syncMethodUI(); applyOptToSelected(); });
+  $('strength').addEventListener('input', e=>{ opt.strength=+e.target.value; $('strengthVal').textContent=e.target.value; applyOptToSelected(); });
+  $('solidColor').addEventListener('input', e=>{ opt.solidColor=e.target.value; applyOptToSelected(); });
+  $('strokeColor').addEventListener('input', e=>{ opt.strokeColor=e.target.value; applyOptToSelected(); });
+  $('thickness').addEventListener('input', e=>{ opt.thickness=+e.target.value; $('thicknessVal').textContent=e.target.value; applyOptToSelected(); });
+  $('spotDark').addEventListener('input', e=>{ opt.spotDarkness=+e.target.value/100; $('spotDarkVal').textContent=e.target.value+'%'; applyOptToSelected(); });
+
+  // 저장 포맷/품질 옵션
+  function syncSaveUI(){
+    const isJpg = $('saveFormat').value==='jpg';
+    ['qualityLabel','jpgQuality','jpgQualityVal'].forEach(id=>$(id).classList.toggle('hidden', !isJpg));
+  }
+  $('saveFormat').addEventListener('change', syncSaveUI);
+  $('jpgQuality').addEventListener('input', e=>{ $('jpgQualityVal').textContent=e.target.value; });
+
+  // 선택된 객체에 옵션 실시간 반영
+  function applyOptToSelected(){
+    const o = objects.find(x=>x.id===selectedId);
+    if (!o) return;
+    if (o.type.startsWith('mosaic')){
+      o.method=opt.mosaicMethod; o.strength=opt.strength; o.color=opt.solidColor;
+    } else if (o.type.startsWith('spotlight')){
+      o.darkness=opt.spotDarkness;
+    } else {
+      o.color=opt.strokeColor; o.thickness=opt.thickness;
+    }
+    render();
+  }
+
+  // ---------- 액션 버튼 ----------
+  $('undoBtn').addEventListener('click', undo);
+  $('redoBtn').addEventListener('click', redo);
+  $('forwardBtn').addEventListener('click', ()=>reorder('up'));
+  $('backwardBtn').addEventListener('click', ()=>reorder('down'));
+  $('deleteBtn').addEventListener('click', deleteSelected);
+
+  // 레이어 순서 변경
+  function reorder(dir){
+    const i = objects.findIndex(o=>o.id===selectedId);
+    if (i<0) return;
+    if (dir==='up' && i<objects.length-1){ pushHistory(); [objects[i],objects[i+1]]=[objects[i+1],objects[i]]; }
+    else if (dir==='down' && i>0){ pushHistory(); [objects[i],objects[i-1]]=[objects[i-1],objects[i]]; }
+    else return;
+    render();
+  }
+  $('clearBtn').addEventListener('click', ()=>{
+    if (!objects.length) return;
+    pushHistory(); objects=[]; selectedId=null; render(); refreshButtons(); toast('모든 편집을 지웠습니다.');
+  });
+  function deleteSelected(){
+    if (selectedId===null) return;
+    pushHistory();
+    objects = objects.filter(o=>o.id!==selectedId);
+    selectedId=null; render(); refreshButtons();
+  }
+
+  // ---------- 입력: 붙여넣기 / 드롭 / 파일 ----------
+  window.addEventListener('paste', e=>{
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const it of items){
+      if (it.type.startsWith('image/')){
+        const f = it.getAsFile();
+        if (f){ loadFromBlobOrFile(f); e.preventDefault(); return; }
+      }
+    }
+  });
+
+  $('pasteBtn').addEventListener('click', async ()=>{
+    if (!navigator.clipboard || !navigator.clipboard.read){
+      toast('이 브라우저는 버튼 붙여넣기를 지원하지 않습니다. Ctrl+V를 사용하세요.'); return;
+    }
+    try{
+      const items = await navigator.clipboard.read();
+      for (const it of items){
+        const type = it.types.find(t=>t.startsWith('image/'));
+        if (type){ const blob = await it.getType(type); loadFromBlobOrFile(new File([blob],'pasted',{type})); return; }
+      }
+      toast('클립보드에 이미지가 없습니다.');
+    }catch(err){ toast('클립보드 접근이 거부되었습니다. Ctrl+V를 사용하세요.'); }
+  });
+
+  const stage = $('stage');
+  ['dragenter','dragover'].forEach(ev=>stage.addEventListener(ev, e=>{ e.preventDefault(); stage.classList.add('dragover'); }));
+  ['dragleave','drop'].forEach(ev=>stage.addEventListener(ev, e=>{ e.preventDefault(); stage.classList.remove('dragover'); }));
+  stage.addEventListener('drop', e=>{
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) loadFromBlobOrFile(f);
+  });
+
+  $('openBtn').addEventListener('click', ()=>$('fileInput').click());
+  $('placeholderPick').addEventListener('click', ()=>$('fileInput').click());
+  $('fileInput').addEventListener('change', e=>{ const f=e.target.files[0]; if (f) loadFromBlobOrFile(f); e.target.value=''; });
+
+  // ---------- 출력: 복사 / 저장 ----------
+  function renderForExport(){
+    // 선택 핸들 없이 깔끔하게 렌더 (export 시 selectedId 잠시 해제)
+    const keep = selectedId; selectedId=null; render();
+    selectedId = keep;
+  }
+  function exportBlob(type, quality){
+    return new Promise(res=>{
+      renderForExport();
+      canvas.toBlob(b=>{ render(); res(b); }, type, quality);
+    });
+  }
+
+  $('copyBtn').addEventListener('click', async ()=>{
+    if (!hasImage) return;
+    try{
+      const blob = await exportBlob('image/png');
+      if (!navigator.clipboard || !window.ClipboardItem) throw new Error('unsupported');
+      await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+      toast('✅ 클립보드로 복사했습니다.');
+    }catch(err){
+      toast('복사 실패 — 브라우저가 지원하지 않거나 권한이 없습니다. 저장을 이용하세요.');
+    }
+  });
+
+  $('saveBtn').addEventListener('click', async ()=>{
+    if (!hasImage) return;
+    const fmt = $('saveFormat').value;
+    const type = fmt==='jpg' ? 'image/jpeg' : 'image/png';
+    const quality = fmt==='jpg' ? (+$('jpgQuality').value/100) : undefined;
+    const blob = await exportBlob(type, quality);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:T]/g,'-').slice(0,19);
+    a.href = URL.createObjectURL(blob);
+    a.download = `edited-${ts}.${fmt}`;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+    toast('💾 저장했습니다.');
+  });
+
+  // ---------- AI 얼굴 자동 감지 ----------
+  let faceModelsLoaded = false;
+  let faceApiLoading = null;
+  const FACE_SCRIPT = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js';
+  const FACE_MODELS = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+
+  function loadFaceApi(){
+    if (window.faceapi && faceModelsLoaded) return Promise.resolve();
+    if (faceApiLoading) return faceApiLoading;
+    faceApiLoading = new Promise((resolve, reject) => {
+      const loadModels = () => {
+        window.faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODELS)
+          .then(() => { faceModelsLoaded = true; resolve(); })
+          .catch(reject);
+      };
+      if (window.faceapi){ loadModels(); return; }
+      const s = document.createElement('script');
+      s.src = FACE_SCRIPT;
+      s.onload = loadModels;
+      s.onerror = () => reject(new Error('script load failed'));
+      document.head.appendChild(s);
+    });
+    return faceApiLoading;
+  }
+
+  async function autoFaceMosaic(){
+    if (!hasImage) return;
+    const btn = $('faceBtn');
+    btn.disabled = true; const label = btn.textContent;
+    try{
+      setStatus('얼굴 인식 모델 불러오는 중… (최초 1회, 인터넷 필요)');
+      btn.textContent = '⏳ 모델 로딩…';
+      await loadFaceApi();
+      setStatus('얼굴을 찾는 중…');
+      btn.textContent = '🔎 분석 중…';
+      const det = await window.faceapi.detectAllFaces(
+        base, new window.faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: 0.4 })
+      );
+      if (!det.length){ toast('얼굴을 찾지 못했습니다.'); setStatus('얼굴 0개 — 수동으로 가려주세요.'); return; }
+      pushHistory();
+      for (const d of det){
+        const b = d.box;
+        const padX = b.width*0.10, padY = b.height*0.16;
+        objects.push({
+          id: nextId++, type: 'mosaic-rect',
+          x: Math.max(0, b.x - padX), y: Math.max(0, b.y - padY),
+          w: b.width + padX*2, h: b.height + padY*2,
+          method: opt.mosaicMethod, strength: Math.max(opt.strength, 14), color: opt.solidColor
+        });
+      }
+      selectedId = null; render(); refreshButtons();
+      toast(`✅ 얼굴 ${det.length}개를 모자이크 처리했습니다.`);
+      setStatus(`얼굴 ${det.length}개 자동 처리 완료`);
+    }catch(err){
+      console.error(err);
+      toast('얼굴 인식 모델을 불러오지 못했습니다 (인터넷 연결이 필요합니다).');
+      setStatus('얼굴 인식 실패 — 수동 모자이크를 사용하세요.');
+    }finally{
+      btn.textContent = label; btn.disabled = !hasImage;
+    }
+  }
+  $('faceBtn').addEventListener('click', autoFaceMosaic);
+
+  // ---------- 키보드 단축키 ----------
+  window.addEventListener('keydown', e=>{
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey?redo():undo(); return; }
+    if (mod && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); return; }
+    if (mod && e.key.toLowerCase()==='c' && hasImage && selectedId===null){ /* 전체복사는 버튼 사용 */ }
+    if ((e.key==='Delete'||e.key==='Backspace') && selectedId!==null){
+      if (document.activeElement.tagName!=='INPUT'){ e.preventDefault(); deleteSelected(); }
+      return;
+    }
+    // 도구 단축키
+    if (!e.ctrlKey && !e.metaKey && !e.altKey){
+      const k = e.key.toLowerCase();
+      const map={v:'select',r:'mosaic-rect',o:'mosaic-ellipse',f:'mosaic-free',a:'shape-arrow'};
+      if (map[k] && document.activeElement.tagName!=='INPUT'){ switchTool(map[k]); }
+    }
+  });
+
+  // 초기 UI
+  syncMethodUI();
+  syncSaveUI();
+  refreshButtons();
+})();
+</script>
+</body>
+</html>
