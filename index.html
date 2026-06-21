@@ -134,7 +134,8 @@
       <button class="btn ghost" id="forwardBtn" title="앞으로 가져오기" disabled>▲ 앞으로</button>
       <button class="btn ghost" id="backwardBtn" title="뒤로 보내기" disabled>▼ 뒤로</button>
       <button class="btn ghost" id="deleteBtn" title="선택 삭제 (Del)" disabled>🗑 삭제</button>
-      <button class="btn ghost" id="clearBtn" title="전체 초기화" disabled>전체초기화</button>
+      <button class="btn ghost" id="clearBtn" title="편집 객체만 모두 지우기 (이미지는 유지)" disabled>전체초기화</button>
+      <button class="btn ghost" id="resetBtn" title="이미지·편집·저장된 작업까지 모두 삭제하고 처음 상태로" disabled>🧹 모두비우기</button>
     </div>
   </div>
 
@@ -287,6 +288,7 @@
     $('copyBtn').disabled = !hasImage;
     $('saveBtn').disabled = !hasImage;
     $('faceBtn').disabled = !hasImage;
+    $('resetBtn').disabled = !hasImage;
   }
 
   // ---------- 이미지 로딩 ----------
@@ -841,6 +843,26 @@
     pushHistory();
     objects = objects.filter(o=>o.id!==selectedId);
     selectedId=null; render(); refreshButtons();
+  }
+
+  // 이미지·편집·저장본까지 완전히 비우고 처음 상태로
+  $('resetBtn').addEventListener('click', ()=>{
+    if (!hasImage) return;
+    if (!confirm('현재 이미지와 모든 편집 내용, 그리고 저장된 작업까지 완전히 삭제합니다.\n되돌릴 수 없습니다. 계속할까요?')) return;
+    resetAll();
+  });
+  function resetAll(){
+    clearTimeout(saveTimer);
+    objects = []; selectedId = null; history = []; future = [];
+    hasImage = false; currentImageBlob = null;
+    bctx.clearRect(0,0,base.width,base.height);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    canvas.classList.remove('ready');
+    $('placeholder').classList.remove('hidden');
+    idbClear();
+    refreshButtons();
+    setStatus('모두 비웠습니다. 이미지를 붙여넣어 다시 시작하세요.');
+    toast('🧹 저장된 작업을 모두 비웠습니다.');
   }
 
   // ---------- 입력: 붙여넣기 / 드롭 / 파일 ----------
