@@ -954,20 +954,32 @@
   $('faceBtn').addEventListener('click', autoFaceMosaic);
 
   // ---------- 키보드 단축키 ----------
+  // 실제 글자를 입력하는 칸(텍스트/숫자/textarea/편집영역)에 포커스가 있을 때만 단축키를 막는다.
+  // (슬라이더·컬러피커·셀렉트 등은 막지 않음 → 이들을 만진 뒤에도 Delete로 삭제 가능)
+  function isTextEntry(el){
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+    if (el.tagName === 'TEXTAREA') return true;
+    if (el.tagName === 'INPUT'){
+      const t = (el.type || 'text').toLowerCase();
+      return ['text','search','email','url','password','number','tel'].includes(t);
+    }
+    return false;
+  }
+
   window.addEventListener('keydown', e=>{
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey?redo():undo(); return; }
     if (mod && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); return; }
-    if (mod && e.key.toLowerCase()==='c' && hasImage && selectedId===null){ /* 전체복사는 버튼 사용 */ }
     if ((e.key==='Delete'||e.key==='Backspace') && selectedId!==null){
-      if (document.activeElement.tagName!=='INPUT'){ e.preventDefault(); deleteSelected(); }
+      if (!isTextEntry(document.activeElement)){ e.preventDefault(); deleteSelected(); }
       return;
     }
     // 도구 단축키
-    if (!e.ctrlKey && !e.metaKey && !e.altKey){
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !isTextEntry(document.activeElement)){
       const k = e.key.toLowerCase();
       const map={v:'select',r:'mosaic-rect',o:'mosaic-ellipse',f:'mosaic-free',a:'shape-arrow'};
-      if (map[k] && document.activeElement.tagName!=='INPUT'){ switchTool(map[k]); }
+      if (map[k]){ switchTool(map[k]); }
     }
   });
 
