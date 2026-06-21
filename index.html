@@ -51,7 +51,7 @@
   .val{font-size:12px; color:var(--muted); min-width:34px; text-align:right; font-variant-numeric:tabular-nums}
 
   .stage{
-    flex:1; position:relative; overflow:auto; display:flex; align-items:center; justify-content:center;
+    flex:1; position:relative; overflow:auto; display:flex; align-items:safe center; justify-content:safe center;
     background:
       linear-gradient(45deg,#14161c 25%,transparent 25%),
       linear-gradient(-45deg,#14161c 25%,transparent 25%),
@@ -86,6 +86,22 @@
     border:2px dashed var(--accent); border-radius:14px; display:flex; align-items:center; justify-content:center;
     color:var(--accent); font-size:18px; font-weight:700; background:rgba(79,140,255,.08);
   }
+
+  .zoombar{
+    position:absolute; right:16px; bottom:16px; z-index:20;
+    display:none; align-items:center; gap:2px; padding:4px;
+    background:rgba(24,27,34,.92); border:1px solid var(--line); border-radius:12px;
+    box-shadow:0 6px 24px rgba(0,0,0,.45); backdrop-filter:blur(4px);
+  }
+  .zoombar button{
+    appearance:none; border:none; background:transparent; color:var(--text);
+    width:32px; height:30px; border-radius:8px; cursor:pointer; font-size:16px; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .zoombar button:hover{background:#2f3644}
+  .zoombar #zoomLevel{width:auto; padding:0 8px; font-size:12.5px; font-variant-numeric:tabular-nums; min-width:48px}
+  .zoombar #zoomFit{width:auto; padding:0 8px; font-size:12.5px}
+  .zoombar .zsep{width:1px; height:18px; background:var(--line); margin:0 2px}
 
   footer{
     border-top:1px solid var(--line); background:var(--panel); padding:6px 14px;
@@ -200,6 +216,13 @@
       얼굴·번호판·이름 등 민감한 부분을 모자이크로 가리고, 중요한 부분은 도형으로 강조할 수 있습니다.</div>
     <button class="btn primary pick" id="placeholderPick">📂 이미지 파일 선택</button>
   </div>
+  <div class="zoombar" id="zoombar">
+    <button id="zoomOut" title="축소 (Ctrl -)">−</button>
+    <button id="zoomLevel" title="100%로 보기">100%</button>
+    <button id="zoomIn" title="확대 (Ctrl +)">+</button>
+    <span class="zsep"></span>
+    <button id="zoomFit" title="화면 맞춤 (Ctrl 0)">맞춤</button>
+  </div>
 </div>
 
 <footer>
@@ -289,6 +312,7 @@
     $('saveBtn').disabled = !hasImage;
     $('faceBtn').disabled = !hasImage;
     $('resetBtn').disabled = !hasImage;
+    const zb = $('zoombar'); if (zb) zb.style.display = hasImage ? 'flex' : 'none';
   }
 
   // ---------- 이미지 로딩 ----------
@@ -346,17 +370,36 @@
   window.addEventListener('pagehide', flushPersist);
   document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='hidden') flushPersist(); });
 
-  function fitCanvas(){
-    // CSS로 stage에 맞춰 축소 (원본 해상도는 유지)
-    const stage = $('stage');
-    const pad = 48;
-    const maxW = stage.clientWidth - pad;
-    const maxH = stage.clientHeight - pad;
-    const scale = Math.min(1, maxW / canvas.width, maxH / canvas.height);
-    canvas.style.width = (canvas.width * scale) + 'px';
-    canvas.style.height = (canvas.height * scale) + 'px';
+  // ---------- 확대 / 축소 (줌) ----------
+  let viewScale = 1;
+  const MIN_ZOOM = 0.1, MAX_ZOOM = 8;
+  function fitScaleValue(){
+    const st = $('stage'); const pad = 48;
+    return Math.min(1, (st.clientWidth - pad) / canvas.width, (st.clientHeight - pad) / canvas.height);
   }
-  window.addEventListener('resize', () => { if (hasImage) fitCanvas(); });
+  function applyView(){
+    canvas.style.width  = (canvas.width  * viewScale) + 'px';
+    canvas.style.height = (canvas.height * viewScale) + 'px';
+    const lbl = $('zoomLevel'); if (lbl) lbl.textContent = Math.round(viewScale * 100) + '%';
+  }
+  // 화면에 맞춤 (원본 해상도는 유지)
+  function fitCanvas(){ viewScale = fitScaleValue(); applyView(); }
+  // 특정 화면 좌표(ax,ay)를 기준으로 확대/축소 — 커서 아래 지점이 그대로 유지됨
+  function setZoom(scale, ax, ay){
+    if (!hasImage) return;
+    scale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
+    const st = $('stage');
+    if (ax == null){ const sr = st.getBoundingClientRect(); ax = sr.left + sr.width/2; ay = sr.top + sr.height/2; }
+    const rect = canvas.getBoundingClientRect();
+    const cx = (ax - rect.left) / viewScale;   // 캔버스(원본) 좌표
+    const cy = (ay - rect.top)  / viewScale;
+    viewScale = scale; applyView();
+    const rect2 = canvas.getBoundingClientRect();
+    st.scrollLeft += (rect2.left + cx * viewScale) - ax;
+    st.scrollTop  += (rect2.top  + cy * viewScale) - ay;
+  }
+  function zoomBy(f, ax, ay){ setZoom(viewScale * f, ax, ay); }
+  window.addEventListener('resize', () => { if (hasImage) applyView(); });
 
   // ---------- 좌표 변환 ----------
   function toCanvasCoords(e){
@@ -943,6 +986,20 @@
     toast('💾 저장했습니다.');
   });
 
+  // ---------- 줌 컨트롤 연결 ----------
+  $('zoomIn').addEventListener('click', () => zoomBy(1.25));
+  $('zoomOut').addEventListener('click', () => zoomBy(1/1.25));
+  $('zoomFit').addEventListener('click', fitCanvas);
+  $('zoomLevel').addEventListener('click', () => setZoom(1));   // 100% 보기
+  // Ctrl/⌘ + 휠, 트랙패드 핀치 → 커서 기준 확대/축소
+  $('stage').addEventListener('wheel', e => {
+    if (!hasImage) return;
+    if (e.ctrlKey || e.metaKey){
+      e.preventDefault();
+      setZoom(viewScale * (e.deltaY < 0 ? 1.12 : 1/1.12), e.clientX, e.clientY);
+    }
+  }, { passive:false });
+
   // ---------- AI 얼굴 자동 감지 ----------
   let faceModelsLoaded = false;
   let faceApiLoading = null;
@@ -1024,6 +1081,9 @@
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey?redo():undo(); return; }
     if (mod && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); return; }
+    if (mod && (e.key==='=' || e.key==='+')){ if (hasImage){ e.preventDefault(); zoomBy(1.25); } return; }
+    if (mod && e.key==='-'){ if (hasImage){ e.preventDefault(); zoomBy(1/1.25); } return; }
+    if (mod && e.key==='0'){ if (hasImage){ e.preventDefault(); fitCanvas(); } return; }
     if ((e.key==='Delete'||e.key==='Backspace') && selectedId!==null){
       if (!isTextEntry(document.activeElement)){ e.preventDefault(); deleteSelected(); }
       return;
