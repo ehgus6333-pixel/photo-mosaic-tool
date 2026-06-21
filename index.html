@@ -290,7 +290,7 @@
   }
 
   // ---------- 이미지 로딩 ----------
-  function loadImage(img){
+  function loadImage(img, restoreState){
     base.width = img.naturalWidth || img.width;
     base.height = img.naturalHeight || img.height;
     bctx.clearRect(0,0,base.width,base.height);
@@ -298,7 +298,13 @@
     canvas.width = base.width;
     canvas.height = base.height;
     fitCanvas();
-    objects = []; selectedId = null; history = []; future = [];
+    if (restoreState && Array.isArray(restoreState.objects)){
+      objects = restoreState.objects;
+      nextId = restoreState.nextId || (objects.reduce((m,o)=>Math.max(m,o.id||0),0) + 1);
+    } else {
+      objects = [];
+    }
+    selectedId = null; history = []; future = [];
     hasImage = true;
     canvas.classList.add('ready');
     $('placeholder').classList.add('hidden');
@@ -307,12 +313,36 @@
   }
   function loadFromBlobOrFile(file){
     if (!file || !file.type.startsWith('image/')) { toast('이미지 파일이 아닙니다.'); return; }
+    currentImageBlob = file;
     const url = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => { loadImage(img); URL.revokeObjectURL(url); toast('이미지를 불러왔습니다.'); };
+    img.onload = () => { loadImage(img); URL.revokeObjectURL(url); toast('이미지를 불러왔습니다.'); persist(); };
     img.onerror = () => { toast('이미지를 읽지 못했습니다.'); URL.revokeObjectURL(url); };
     img.src = url;
   }
+
+  // ---------- 자동 저장 / 복원 (IndexedDB) ----------
+  // 새로고침하거나 브라우저를 닫았다 다시 열어도 이미지와 편집 내용을 그대로 복원한다.
+  const DB_NAME='photoMosaicEditor', DB_STORE='state', DB_KEY='current';
+  let currentImageBlob=null, dbPromise=null, saveTimer=null;
+  function openDB(){
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((res,rej)=>{
+      const r = indexedDB.open(DB_NAME,1);
+      r.onupgradeneeded = () => r.result.createObjectStore(DB_STORE);
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    return dbPromise;
+  }
+  function idbSet(v){ return openDB().then(db=>new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,'readwrite'); tx.objectStore(DB_STORE).put(v,DB_KEY); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); })); }
+  function idbGet(){ return openDB().then(db=>new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,'readonly'); const q=tx.objectStore(DB_STORE).get(DB_KEY); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); })); }
+  function idbClear(){ return openDB().then(db=>new Promise((res)=>{ const tx=db.transaction(DB_STORE,'readwrite'); tx.objectStore(DB_STORE).delete(DB_KEY); tx.oncomplete=res; tx.onerror=res; })).catch(()=>{}); }
+  function doSave(){ if (!hasImage || !currentImageBlob) return; idbSet({ imageBlob:currentImageBlob, w:base.width, h:base.height, objects, nextId }).catch(()=>{}); }
+  function persist(){ clearTimeout(saveTimer); saveTimer = setTimeout(doSave, 300); }
+  function flushPersist(){ clearTimeout(saveTimer); doSave(); }
+  window.addEventListener('pagehide', flushPersist);
+  document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='hidden') flushPersist(); });
 
   function fitCanvas(){
     // CSS로 stage에 맞춰 축소 (원본 해상도는 유지)
@@ -344,6 +374,7 @@
     drawSpotlights();
     const sel = objects.find(o => o.id === selectedId);
     if (sel) drawSelection(sel);
+    persist();
   }
 
   // 스포트라이트: 전체를 어둡게 + 지정 영역만 밝게 뚫기 (여러 개 합성)
@@ -987,6 +1018,25 @@
   syncMethodUI();
   syncSaveUI();
   refreshButtons();
+
+  // 이전 작업 자동 복원 (새로고침/재방문 대응)
+  (async () => {
+    try {
+      const rec = await idbGet();
+      if (rec && rec.imageBlob){
+        currentImageBlob = rec.imageBlob;
+        const u = URL.createObjectURL(rec.imageBlob);
+        const img = new Image();
+        img.onload = () => {
+          loadImage(img, { objects: rec.objects, nextId: rec.nextId });
+          URL.revokeObjectURL(u);
+          toast('이전 작업을 복원했습니다.');
+        };
+        img.onerror = () => URL.revokeObjectURL(u);
+        img.src = u;
+      }
+    } catch(e){ /* 복원 실패 시 무시 */ }
+  })();
 })();
 </script>
 </body>
